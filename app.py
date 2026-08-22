@@ -11,39 +11,46 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot V4 Strong Trend Live - OK"
+    return "Bot V4 - Filtre 15m+1h actif"
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
+# --- COLLE TES INFOS ICI ---
+BOT_TOKEN = "8857935832:AAH37acQPQwjPkOcwpuNrryRm5lQSdJFkS8"
+CHAT_ID = "7335134261"
+# ---------------------------
+
 COINS = ["BTC-USD", "SOL-USD", "BNB-USD", "XRP-USD", "ADA-USD", "DOGE-USD"]
 
 def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
     except: pass
 
 def get_rsi(symbol, period, interval):
     try:
         df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True)
+        if len(df) < 20: return 50
         close = df['Close']
         if isinstance(close, pd.DataFrame): close = close.squeeze()
-        rsi = ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1]
-        return float(rsi)
-    except:
-        return 50
+        rsi = float(ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1])
+        return rsi
+    except: return 50
 
 def bot_loop():
+    time.sleep(5)
+    send_telegram("✅ Bot V4 lancé - J'envoie que si 15m ET 1h sont d'accord")
     while True:
         for coin in COINS:
             rsi_15 = get_rsi(coin, "2d", "15m")
             rsi_1h = get_rsi(coin, "5d", "1h")
             
-            # SEULEMENT MEME TENDANCE
+            # FILTRE QU'ON A PREVU
             if rsi_15 > 52 and rsi_1h > 52:
-                send_telegram(f"🚀 STRONG BUY {coin} 15m:{rsi_15:.1f} 1h:{rsi_1h:.1f}")
+                send_telegram(f"🚀 STRONG BUY {coin}\n15m: {rsi_15:.1f} | 1h: {rsi_1h:.1f}")
             elif rsi_15 < 48 and rsi_1h < 48:
-                send_telegram(f"🔻 STRONG SELL {coin} 15m:{rsi_15:.1f} 1h:{rsi_1h:.1f}")
+                send_telegram(f"🔻 STRONG SELL {coin}\n15m: {rsi_15:.1f} | 1h: {rsi_1h:.1f}")
+            else:
+                print(f"{coin} pas aligné 15m:{rsi_15:.1f} 1h:{rsi_1h:.1f} -> j'ignore")
         
         time.sleep(900) # 15 minutes
 
