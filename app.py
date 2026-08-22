@@ -1,47 +1,53 @@
-import yfinance as yf, pandas as pd, ta, time, requests, threading, os
+import yfinance as yf
+import pandas as pd
+import ta
+import time
+import requests
+import os
 from flask import Flask
-from datetime import datetime
-TOKEN="8857935832:AAH37acQPQwjPkOcwpuNrryRm5lQSdJFkS8"
-CHAT_ID="7335134261"
-PAIRES=["BTC-USD","SOL-USD","BNB-USD","XRP-USD","ADA-USD","DOGE-USD"]
-app=Flask(__name__)
-def send_telegram(m):
-    try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",data={"chat_id":CHAT_ID,"text":m},timeout=10)
-    except:
-        pass
-def check(p,tf):
-    try:
-        df=yf.download(p,period="3d",interval=tf,progress=False,auto_adjust=True)
-        if isinstance(df.columns,pd.MultiIndex):
-            df.columns=df.columns.get_level_values(0)
-        if len(df)<50:
-            return None
-        df['ema20']=ta.trend.EMAIndicator(df['Close'],20).ema_indicator()
-        df['ema50']=ta.trend.EMAIndicator(df['Close'],50).ema_indicator()
-        df['rsi']=ta.momentum.RSIIndicator(df['Close'],14).rsi()
-        df['adx']=ta.trend.ADXIndicator(df['High'],df['Low'],df['Close'],14).adx()
-        last=df.iloc[-1]
-        if last['adx']<20:
-            return None
-        if last['ema20']>last['ema50'] and 50<last['rsi']<70:
-            return f"BUY {p} {tf} RSI {last['rsi']:.1f}"
-        if last['ema20']<last['ema50'] and 30<last['rsi']<50:
-            return f"SELL {p} {tf} RSI {last['rsi']:.1f}"
-    except:
-        return None
-def bot_loop():
-    send_telegram("BOT LANCE 🚀")
-    while True:
-        for pair in PAIRES:
-            for tf in ["15m","1h"]:
-                s=check(pair,tf)
-                if s:
-                    send_telegram(s)
-        time.sleep(60)
-threading.Thread(target=bot_loop,daemon=True).start()
+from threading import Thread
+
+app = Flask(__name__)
+
 @app.route('/')
 def home():
-    return "BOT ACTIF"
-if __name__=='__main__':
-    app.run(host='0.0.0.0',port=int(os.environ.get("PORT",10000)))
+    return "Bot V4 Strong Trend Live - OK"
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
+COINS = ["BTC-USD", "SOL-USD", "BNB-USD", "XRP-USD", "ADA-USD", "DOGE-USD"]
+
+def send_telegram(msg):
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+    except: pass
+
+def get_rsi(symbol, period, interval):
+    try:
+        df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True)
+        close = df['Close']
+        if isinstance(close, pd.DataFrame): close = close.squeeze()
+        rsi = ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1]
+        return float(rsi)
+    except:
+        return 50
+
+def bot_loop():
+    while True:
+        for coin in COINS:
+            rsi_15 = get_rsi(coin, "2d", "15m")
+            rsi_1h = get_rsi(coin, "5d", "1h")
+            
+            # SEULEMENT MEME TENDANCE
+            if rsi_15 > 52 and rsi_1h > 52:
+                send_telegram(f"🚀 STRONG BUY {coin} 15m:{rsi_15:.1f} 1h:{rsi_1h:.1f}")
+            elif rsi_15 < 48 and rsi_1h < 48:
+                send_telegram(f"🔻 STRONG SELL {coin} 15m:{rsi_15:.1f} 1h:{rsi_1h:.1f}")
+        
+        time.sleep(900) # 15 minutes
+
+Thread(target=bot_loop, daemon=True).start()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
