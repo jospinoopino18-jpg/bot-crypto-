@@ -1,4 +1,9 @@
-import yfinance as yf
+from flask import Flask
+import threading
+app = Flask(__name__)
+@app.route('/')
+def home(): return "Bot en ligne 24h/24"
+threading.Thread(target=lambda: app.run(host='0.0.0.0', port=10000)).start()import yfinance as yf
 import pandas as pd
 import ta
 import time
