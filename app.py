@@ -24,8 +24,7 @@ def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-    except: 
-        pass
+    except: pass
 
 def get_rsi(symbol, period, interval):
     try:
@@ -35,15 +34,12 @@ def get_rsi(symbol, period, interval):
         if isinstance(close, pd.DataFrame): close = close.squeeze()
         rsi = float(ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1])
         return rsi
-    except: 
-        return 50
+    except: return 50
 
 def bot_loop():
     time.sleep(5)
     send_telegram("✅ Bot V4 lancé - J'envoie que si 15m ET 1h sont d'accord")
     while True:
-        signal_trouve_ce_tour = False
-        
         for coin in COINS:
             rsi_15 = get_rsi(coin, "2d", "15m")
             rsi_1h = get_rsi(coin, "5d", "1h")
@@ -51,16 +47,10 @@ def bot_loop():
             # FILTRE QU'ON A PREVU
             if rsi_15 > 52 and rsi_1h > 52:
                 send_telegram(f"🚀 STRONG BUY {coin}\n15m: {rsi_15:.1f} | 1h: {rsi_1h:.1f}")
-                signal_trouve_ce_tour = True
             elif rsi_15 < 48 and rsi_1h < 48:
                 send_telegram(f"🔻 STRONG SELL {coin}\n15m: {rsi_15:.1f} | 1h: {rsi_1h:.1f}")
-                signal_trouve_ce_tour = True
             else:
                 print(f"{coin} pas aligné 15m:{rsi_15:.1f} 1h:{rsi_1h:.1f} -> j'ignore")
-        
-        # --- NOUVEAUTE : si aucun signal pendant ce cycle de 15min ---
-        if not signal_trouve_ce_tour:
-            send_telegram("⏳ Pas de signaux depuis 15 minutes. Aucun coin n'est aligné en 15m + 1h.")
         
         time.sleep(900) # 15 minutes
 
