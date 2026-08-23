@@ -115,3 +115,4 @@ while True:
         time.sleep(2)
     print(f"--- Scan {datetime.now().strftime('%H:%M:%S')} terminé, attente 15min ---")
     time.sleep(900) # 15min
+    send_msg(f"Test V6 OK - {datetime.now().strftime('%H:%M')} - Bot en ligne")
