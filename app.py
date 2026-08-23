@@ -1,70 +1,117 @@
-from flask import Flask
-import requests, threading, time, yfinance as yf
-from datetime import datetime, timedelta
+import yfinance as yf
 import pandas as pd
+import time
+import requests
+from datetime import datetime
 
-app = Flask(__name__)
+# === CONFIG V6 TENDANCE ===
+CAPITAL = 10.0
+RISQUE_PCT = 0.01  # 1%
+RR = 2  # 2/1
+
+PAIRES = {
+    "BTC-USD": "BTCUSDm",
+    "ETH-USD": "ETHUSDm", 
+    "SOL-USD": "SOLUSDm",
+    "DOGE-USD": "DOGEUSDm",
+    "SHIB-USD": "SHIBUSDm",
+    "AVAX-USD": "AVAXUSDm"
+}
+
+# SEUILS TENDANCE PURE 40/60
+SEUIL_ACHAT = 60  # >60 = ACHAT (on suit la pompe)
+SEUIL_VENTE = 40  # <40 = VENTE (on suit la chute)
+
 TOKEN = "8857935832:AAH37acQPQwjPkOcwpuNrryRm5lQSdJFkS8"
 CHAT_ID = "7335134261"
-COINS = ["BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD", "DOGE-USD", "SHIB-USD"]
 
-last_state = {}
-last_sent_time = {}
-
-def send(msg):
-    try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg}, timeout=15)
-    except: pass
-
-def rsi_wilder(series, period=14):
+def calc_rsi(series, period=14):
     delta = series.diff()
-    gain = delta.where(delta > 0, 0.0)
-    loss = -delta.where(delta < 0, 0.0)
-    avg_gain = gain.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
-    rs = avg_gain / avg_loss
+    gain = delta.where(delta > 0, 0).rolling(window=period).mean()
+    loss = -delta.where(delta < 0, 0).rolling(window=period).mean()
+    rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def get_rsi(symbol, interval):
+def send_msg(text):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
-        period = "5d" if interval=="15m" else "1mo"
-        df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True, threads=False)
-        if df.empty or len(df) < 30: return None
-        close = df['Close']
-        if isinstance(close, pd.DataFrame): close = close.iloc[:, 0]
-        return float(rsi_wilder(close, 14).iloc[-1])
-    except: return None
+        requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+    except:
+        print(text)
 
-def bot_loop():
-    send("✅ V5 AGRESSIVE DEPLOYÉ - Seuil 60/40 (écarté au max) - Check 1min - Rappel 45min")
-    while True:
-        try:
-            for coin in COINS:
-                r15 = get_rsi(coin, "15m")
-                r1h = get_rsi(coin, "1h")
-                if r15 is None or r1h is None: continue
+def check_pair(symbol):
+    try:
+        # 15m
+        df15 = yf.download(symbol, period="2d", interval="15m", progress=False)
+        df15['RSI'] = calc_rsi(df15['Close'])
+        r15 = float(df15['RSI'].iloc[-1])
+        
+        # 1h
+        df1h = yf.download(symbol, period="7d", interval="1h", progress=False)
+        df1h['RSI'] = calc_rsi(df1h['Close'])
+        r1h = float(df1h['RSI'].iloc[-1])
+        
+        price = float(df15['Close'].iloc[-1])
+        
+        # === LOGIQUE V6 TENDANCE (TA STRATÉGIE) ===
+        if r15 > SEUIL_ACHAT and r1h > SEUIL_ACHAT:
+            signal = f"🔵 ACHAT {symbol}"
+            sens = "ACHAT"
+        elif r15 < SEUIL_VENTE and r1h < SEUIL_VENTE:
+            signal = f"🔴 VENTE {symbol}"
+            sens = "VENTE"
+        else:
+            signal = f"⚪ CALME {symbol}"
+            sens = "CALME"
+        
+        # Calcul SL/TP pour 10$ avec 1% et RR 2/1
+        risque_dollar = CAPITAL * RISQUE_PCT  # 0.10$
+        
+        if "BTC" in symbol:
+            sl_dist = 100
+            tp_dist = 200
+            lot = 0.01
+        elif "ETH" in symbol:
+            sl_dist = 10
+            tp_dist = 20
+            lot = 0.01
+        else: # DOGE, SHIB parfait pour 10$
+            sl_dist = price * 0.01  # 1% de distance
+            tp_dist = sl_dist * RR
+            lot = 0.01
 
-                # SEUILS ECARTES AU MAX
-                if r15 < 40 and r1h < 50: current = "ACHAT"
-                elif r15 > 60 and r1h > 50: current = "VENTE"
-                else: current = "CALME"
+        if sens == "ACHAT":
+            sl = price - sl_dist
+            tp = price + tp_dist
+        elif sens == "VENTE":
+            sl = price + sl_dist
+            tp = price - tp_dist
+        else:
+            sl = tp = 0
 
-                prev = last_state.get(coin)
-                last_time = last_sent_time.get(coin)
-                should_send = False
-                if prev!= current: should_send = True
-                elif last_time and datetime.now() - last_time > timedelta(minutes=45): should_send = True
-                elif prev is None: should_send = True
+        # Message final
+        if sens != "CALME":
+            msg = (f"{signal}\n"
+                   f"15m:{r15:.1f} 1h:{r1h:.1f} (tendance)\n"
+                   f"Prix:{price:.4f} Lot:{lot} SL:{sl:.2f} TP:{tp:.2f}\n"
+                   f"Risque: {risque_dollar:.2f}$ | Gain: {risque_dollar*RR:.2f}$ | RR {RR}/1")
+            return msg
+        else:
+            return f"{signal}\n15m:{r15:.1f} 1h:{r1h:.1f} (tendance)"
 
-                if should_send:
-                    if current == "ACHAT": send(f"🟢 ACHAT {coin}\n15m:{r15:.1f} 1h:{r1h:.1f}")
-                    elif current == "VENTE": send(f"🔴 VENTE {coin}\n15m:{r15:.1f} 1h:{r1h:.1f} (signal écarté)")
-                    else: send(f"⏸️ {coin} Calme | 15m:{r15:.1f} 1h:{r1h:.1f}")
-                    last_state[coin] = current
-                    last_sent_time[coin] = datetime.now()
-            time.sleep(60)
-        except: time.sleep(60)
+    except Exception as e:
+        return f"Erreur {symbol}: {e}"
 
-threading.Thread(target=bot_loop, daemon=True).start()
-@app.route("/")
-def home(): return "V5 Aggressive Live"
-if __name__ == "__main__": app.run(host="0.0.0.0", port=10000)
+# === BOUCLE ===
+print("V6 TENDANCE lancée - 40/60 - >60=ACHAT <40=VENTE")
+while True:
+    for sym in PAIRES:
+        msg = check_pair(sym)
+        if "ACHAT" in msg or "VENTE" in msg:
+            if "CALME" not in msg:
+                # Envoie seulement si >60 ou <40 sur les 2 TF
+                print(f"{datetime.now().strftime('%H:%M')} {msg}")
+                send_msg(f"{datetime.now().strftime('%H:%M')} {msg}")
+        time.sleep(2)
+    print(f"--- Scan {datetime.now().strftime('%H:%M:%S')} terminé, attente 15min ---")
+    time.sleep(900) # 15min
