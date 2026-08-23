@@ -5,6 +5,7 @@ import requests
 from datetime import datetime
 from flask import Flask
 import threading
+import os
 
 CAPITAL = 10.0
 RISQUE_PCT = 0.01
@@ -24,11 +25,11 @@ PAIRES = {
 TOKEN = "8857935832:AAH37acQPQwjPkOcwpuNrryRm5lQSdJFkS8"
 CHAT_ID = "7335134261"
 
-# FIX PORT RENDER - AJOUT 1
 app = Flask(__name__)
+
 @app.route('/')
 def home():
-    return f"V6 TENDANCE OK - {datetime.now()}"
+    return "V6 TENDANCE OK"
 
 def calc_rsi(series, period=14):
     delta = series.diff()
@@ -50,13 +51,10 @@ def check_pair(symbol):
         if df15.empty: return None
         df15['RSI'] = calc_rsi(df15['Close'])
         r15 = float(df15['RSI'].iloc[-1])
-
         df1h = yf.download(symbol, period="7d", interval="1h", progress=False)
         df1h['RSI'] = calc_rsi(df1h['Close'])
         r1h = float(df1h['RSI'].iloc[-1])
-
         price = float(df15['Close'].iloc[-1])
-
         if r15 > SEUIL_ACHAT and r1h > SEUIL_ACHAT:
             sens = "ACHAT"
             signal = f"🔵 ACHAT {symbol}"
@@ -66,7 +64,6 @@ def check_pair(symbol):
         else:
             print(f"{datetime.now().strftime('%H:%M')} CALME {symbol} 15m:{r15:.1f} 1h:{r1h:.1f}")
             return None
-
         sl_dist = price * 0.01
         if sens == "ACHAT":
             sl = price - sl_dist
@@ -74,7 +71,6 @@ def check_pair(symbol):
         else:
             sl = price + sl_dist
             tp = price - sl_dist * RR
-
         msg = (f"{signal}\n15m:{r15:.1f} 1h:{r1h:.1f} (tendance)\n"
                f"Prix:{price:.4f} SL:{sl:.2f} TP:{tp:.2f}\n"
                f"10$ -> Risque 0.10$ Gain 0.20$ RR {RR}/1")
@@ -83,21 +79,20 @@ def check_pair(symbol):
         print(f"Erreur {symbol}: {e}")
         return None
 
-# FIX PORT RENDER - AJOUT 2
 def run_bot():
-    print("V6 TENDANCE lancée - 40/60 - >60=ACHAT <40=VENTE")
+    print("V6 TENDANCE lancée - 40/60 - >60=ACHAT <40=VENTE", flush=True)
+    send_msg(f"✅ V6 TENDANCE démarré {datetime.now().strftime('%H:%M')}")
     while True:
         for sym in PAIRES:
             msg = check_pair(sym)
-            if msg and "CALME" not in msg:
-                if "ACHAT" in msg or "VENTE" in msg:
-                    print(msg)
-                    send_msg(msg)
+            if msg:
+                print(msg, flush=True)
+                send_msg(msg)
             time.sleep(3)
         time.sleep(900)
 
 threading.Thread(target=run_bot, daemon=True).start()
 
-# FIX PORT RENDER - AJOUT 3
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=10000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
