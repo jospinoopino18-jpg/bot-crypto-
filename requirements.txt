@@ -1,7 +1,7 @@
-flask
-gunicorn
-yfinance
-pandas
-ta
-requests
-numpy
+Flask==2.3.3
+requests==2.31.0
+yfinance==0.2.31
+pandas_ta==0.3.14b0
+pandas==2.1.4
+numpy==1.26.2
+gunicorn==21.2.0
