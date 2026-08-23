@@ -8,9 +8,8 @@ TOKEN = "8857935832:AAH37acQPQwjPkOcwpuNrryRm5lQSdJFkS8"
 CHAT_ID = "7335134261"
 COINS = ["BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD", "DOGE-USD", "SHIB-USD"]
 
-# MEMOIRE DES SIGNAUX
-last_state = {} # coin -> "ACHAT" / "VENTE" / "CALME"
-last_sent_time = {} # coin -> datetime
+last_state = {}
+last_sent_time = {}
 
 def send(msg):
     try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg}, timeout=15)
@@ -36,7 +35,7 @@ def get_rsi(symbol, interval):
     except: return None
 
 def bot_loop():
-    send("✅ V4.8 LOGIQUE 45MIN DEPLOYÉ - Check 1min, alerte immédiate si changement, rappel 45min si même mouvement")
+    send("✅ V5 AGRESSIVE DEPLOYÉ - Seuil 60/40 (écarté au max) - Check 1min - Rappel 45min")
     while True:
         try:
             for coin in COINS:
@@ -44,44 +43,28 @@ def bot_loop():
                 r1h = get_rsi(coin, "1h")
                 if r15 is None or r1h is None: continue
 
-                if r15 < 30 and r1h < 35: current = "ACHAT"
-                elif r15 > 70 and r1h > 65: current = "VENTE"
+                # SEUILS ECARTES AU MAX
+                if r15 < 40 and r1h < 50: current = "ACHAT"
+                elif r15 > 60 and r1h > 50: current = "VENTE"
                 else: current = "CALME"
 
                 prev = last_state.get(coin)
                 last_time = last_sent_time.get(coin)
-
                 should_send = False
-                # 1. Si ça change -> on envoie tout de suite
-                if prev!= current:
-                    should_send = True
-                # 2. Si même état mais ça fait 45 min -> on rappelle
-                elif last_time and datetime.now() - last_time > timedelta(minutes=45):
-                    should_send = True
-                # 3. Premier démarrage
-                elif prev is None:
-                    should_send = True
+                if prev!= current: should_send = True
+                elif last_time and datetime.now() - last_time > timedelta(minutes=45): should_send = True
+                elif prev is None: should_send = True
 
                 if should_send:
-                    if current == "ACHAT":
-                        send(f"🟢 ACHAT FORT {coin}\n15m:{r15:.1f} 1h:{r1h:.1f} - CHANGEMENT IMMEDIAT")
-                    elif current == "VENTE":
-                        send(f"🔴 VENTE FORTE {coin}\n15m:{r15:.1f} 1h:{r1h:.1f} - CHANGEMENT IMMEDIAT")
-                    else:
-                        # Pour CALME on ne t'envoie plus toutes les minutes, seulement si changement ou rappel 45min
-                        send(f"⏸️ {coin} Calme | 15m:{r15:.1f} 1h:{r1h:.1f}")
-
+                    if current == "ACHAT": send(f"🟢 ACHAT {coin}\n15m:{r15:.1f} 1h:{r1h:.1f}")
+                    elif current == "VENTE": send(f"🔴 VENTE {coin}\n15m:{r15:.1f} 1h:{r1h:.1f} (signal écarté)")
+                    else: send(f"⏸️ {coin} Calme | 15m:{r15:.1f} 1h:{r1h:.1f}")
                     last_state[coin] = current
                     last_sent_time[coin] = datetime.now()
-
             time.sleep(60)
-        except Exception as e:
-            time.sleep(60)
+        except: time.sleep(60)
 
 threading.Thread(target=bot_loop, daemon=True).start()
-
 @app.route("/")
-def home(): return "V4.8 Live"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+def home(): return "V5 Aggressive Live"
+if __name__ == "__main__": app.run(host="0.0.0.0", port=10000)
