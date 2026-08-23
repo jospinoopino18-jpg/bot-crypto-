@@ -1,5 +1,4 @@
-Flask==2.3.3
-requests==2.31.0
-yfinance==0.2.31
-pandas==2.1.4
-gunicorn==21.2.0
+Flask
+requests
+yfinance
+gunicorn
