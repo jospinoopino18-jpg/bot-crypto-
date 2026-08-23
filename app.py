@@ -7,20 +7,28 @@ from flask import Flask
 import threading
 
 CAPITAL = 10.0
+RISQUE_PCT = 0.01
+RR = 2
 SEUIL_ACHAT = 60
 SEUIL_VENTE = 40
-RR = 2
 
-PAIRES = ["BTC-USD", "ETH-USD", "SOL-USD", "DOGE-USD", "SHIB-USD", "AVAX-USD"]
+PAIRES = {
+    "BTC-USD": "BTCUSDm",
+    "ETH-USD": "ETHUSDm",
+    "SOL-USD": "SOLUSDm",
+    "DOGE-USD": "DOGEUSDm",
+    "SHIB-USD": "SHIBUSDm",
+    "AVAX-USD": "AVAXUSDm"
+}
 
 TOKEN = "8857935832:AAH37acQPQwjPkOcwpuNrryRm5lQSdJFkS8"
 CHAT_ID = "7335134261"
 
+# FIX PORT RENDER - AJOUT 1
 app = Flask(__name__)
-
 @app.route('/')
 def home():
-    return f"V6 TENDANCE OK {datetime.now()}"
+    return f"V6 TENDANCE OK - {datetime.now()}"
 
 def calc_rsi(series, period=14):
     delta = series.diff()
@@ -33,40 +41,63 @@ def send_msg(text):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": CHAT_ID, "text": text}, timeout=10)
-    except:
-        pass
+    except Exception as e:
+        print(f"Erreur Telegram: {e}")
 
+def check_pair(symbol):
+    try:
+        df15 = yf.download(symbol, period="2d", interval="15m", progress=False)
+        if df15.empty: return None
+        df15['RSI'] = calc_rsi(df15['Close'])
+        r15 = float(df15['RSI'].iloc[-1])
+
+        df1h = yf.download(symbol, period="7d", interval="1h", progress=False)
+        df1h['RSI'] = calc_rsi(df1h['Close'])
+        r1h = float(df1h['RSI'].iloc[-1])
+
+        price = float(df15['Close'].iloc[-1])
+
+        if r15 > SEUIL_ACHAT and r1h > SEUIL_ACHAT:
+            sens = "ACHAT"
+            signal = f"🔵 ACHAT {symbol}"
+        elif r15 < SEUIL_VENTE and r1h < SEUIL_VENTE:
+            sens = "VENTE"
+            signal = f"🔴 VENTE {symbol}"
+        else:
+            print(f"{datetime.now().strftime('%H:%M')} CALME {symbol} 15m:{r15:.1f} 1h:{r1h:.1f}")
+            return None
+
+        sl_dist = price * 0.01
+        if sens == "ACHAT":
+            sl = price - sl_dist
+            tp = price + sl_dist * RR
+        else:
+            sl = price + sl_dist
+            tp = price - sl_dist * RR
+
+        msg = (f"{signal}\n15m:{r15:.1f} 1h:{r1h:.1f} (tendance)\n"
+               f"Prix:{price:.4f} SL:{sl:.2f} TP:{tp:.2f}\n"
+               f"10$ -> Risque 0.10$ Gain 0.20$ RR {RR}/1")
+        return msg
+    except Exception as e:
+        print(f"Erreur {symbol}: {e}")
+        return None
+
+# FIX PORT RENDER - AJOUT 2
 def run_bot():
-    print("V6 LANCEE >60=ACHAT <40=VENTE")
-    send_msg(f"✅ V6 démarré {datetime.now().strftime('%H:%M')} - Tendance 40/60")
+    print("V6 TENDANCE lancée - 40/60 - >60=ACHAT <40=VENTE")
     while True:
-        for symbol in PAIRES:
-            try:
-                df15 = yf.download(symbol, period="2d", interval="15m", progress=False, auto_adjust=True)
-                df1h = yf.download(symbol, period="7d", interval="1h", progress=False, auto_adjust=True)
-                if df15.empty or df1h.empty: continue
-
-                r15 = float(calc_rsi(df15['Close']).iloc[-1])
-                r1h = float(calc_rsi(df1h['Close']).iloc[-1])
-                price = float(df15['Close'].iloc[-1])
-
-                if r15 > SEUIL_ACHAT and r1h > SEUIL_ACHAT:
-                    msg = f"🔵 ACHAT {symbol}\n15m:{r15:.1f} 1h:{r1h:.1f}\nPrix:{price:.4f} SL-1% TP+2% RR 2/1"
+        for sym in PAIRES:
+            msg = check_pair(sym)
+            if msg and "CALME" not in msg:
+                if "ACHAT" in msg or "VENTE" in msg:
                     print(msg)
                     send_msg(msg)
-                elif r15 < SEUIL_VENTE and r1h < SEUIL_VENTE:
-                    msg = f"🔴 VENTE {symbol}\n15m:{r15:.1f} 1h:{r1h:.1f}\nPrix:{price:.4f} SL+1% TP-2% RR 2/1"
-                    print(msg)
-                    send_msg(msg)
-                else:
-                    print(f"{datetime.now().strftime('%H:%M')} CALME {symbol} {r15:.1f}/{r1h:.1f}")
-
-                time.sleep(3)
-            except Exception as e:
-                print(f"Err {symbol} {e}")
+            time.sleep(3)
         time.sleep(900)
 
 threading.Thread(target=run_bot, daemon=True).start()
 
+# FIX PORT RENDER - AJOUT 3
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=10000)
