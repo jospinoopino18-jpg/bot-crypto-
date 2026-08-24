@@ -1,78 +1,82 @@
-import yfinance as yf, time, requests
-from datetime import datetime
+import requests, time, yfinance as yf
+from ta.momentum import RSIIndicator
 from flask import Flask
-import threading, os
+from threading import Thread
+from datetime import datetime, timedelta
+import os
 
-TOKEN = "8857935832:AAH37acQPQwjPkOcwpuNrryRm5lQSdJFkS8"
+BOT_TOKEN = "8857935832:AAH37acQPQwjPkOcwpuNrryRm5lQSdJFkS8"
 CHAT_ID = "7335134261"
-PAIRES = ["BTC-USD","ETH-USD","SOL-USD","DOGE-USD","SHIB-USD","AVAX-USD"]
 
-dernier_signal, dernier_envoi, debut_calme = {}, {}, {}
-app = Flask(__name__)
-@app.route('/')
-def home(): return "V6.3 DEBUG FORCE OK"
+PAIRES = ['BTC-USD','ETH-USD','SOL-USD','DOGE-USD','SHIB-USD','AVAX-USD']
+NAMES = {'BTC-USD':'BTC','ETH-USD':'ETH','SOL-USD':'SOL','DOGE-USD':'DOGE','SHIB-USD':'SHIB','AVAX-USD':'AVAX'}
 
-def calc_rsi(s, p=14):
-    d=s.diff(); g=d.where(d>0,0).rolling(p).mean(); l=-d.where(d<0,0).rolling(p).mean()
-    return 100-(100/(1+g/l))
+dernier_etat = {}
+dernier_envoi = {}
+dernier_calme = {}
 
-def send(t):
-    try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":CHAT_ID,"text":t,"parse_mode":"Markdown"}, timeout=15)
-    except Exception as e: print(f"send fail {e}")
-
-def get_signal(sym):
+def send(msg):
     try:
-        t = yf.Ticker(sym)
-        df15 = t.history(period="2d", interval="15m", auto_adjust=True)
-        df1h = t.history(period="7d", interval="1h", auto_adjust=True)
-        if df15.empty or len(df15)<15: return f"ERR15 vide {sym}",0,0,0
-        if df1h.empty or len(df1h)<14: return f"ERR1h vide {sym}",0,0,0
-        r15=float(calc_rsi(df15['Close']).iloc[-1]); r1h=float(calc_rsi(df1h['Close']).iloc[-1]); price=float(df15['Close'].iloc[-1])
-        if r15>60 and r1h>60: sig="ACHAT"
-        elif r15<40 and r1h<40: sig="VENTE"
-        else: sig="CALME"
-        return sig, r15, r1h, price
-    except Exception as e:
-        return f"ERR {sym} {str(e)[:80]}",0,0,0
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                      data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
+    except: pass
 
-def run_bot():
-    time.sleep(3)
-    send(f"✅ *V6.3 FORCE START* {datetime.now().strftime('%H:%M')}\nJe force les 6 bilans maintenant...")
+def get_rsi(symbol, interval, period):
+    try:
+        df = yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True)
+        if len(df) < 50: return None
+        close = df['Close'].squeeze()
+        rsi = RSIIndicator(close, window=14).rsi().iloc[-1]
+        return float(rsi)
+    except:
+        return None
+
+def check():
+    now = datetime.now()
     for sym in PAIRES:
-        sig,r15,r1h,price = get_signal(sym)
-        if "ERR" in str(sig):
-            send(f"⚠️ *{sym}* : {sig}\nJe retente...")
-            time.sleep(3)
-            sig,r15,r1h,price = get_signal(sym) # 2e tentative
+        rsi15 = get_rsi(sym, "15m", "2d")
+        rsi1h = get_rsi(sym, "1h", "7d")
+        if rsi15 is None or rsi1h is None: continue
 
-        if "ERR" in str(sig):
-            send(f"❌ *{sym} échoué*: {sig}")
-        else:
-            if sig=="ACHAT": send(f"🔵 *ACHAT {sym} - START*\n15m:{r15:.1f} 1h:{r1h:.1f} | {price:.2f}")
-            elif sig=="VENTE": send(f"🔴 *VENTE {sym} - START*\n15m:{r15:.1f} 1h:{r1h:.1f} | {price:.2f}")
-            else: send(f"⚪ *CALME {sym} - START*\n15m:{r15:.1f} 1h:{r1h:.1f} | {price:.2f}")
-        dernier_signal[sym]=sig; dernier_envoi[sym]=datetime.now(); debut_calme[sym]=datetime.now()
-        time.sleep(2)
+        name = NAMES[sym]
+        # ETAT ACTUEL
+        etat = "CALME"
+        if rsi15 > 60 and rsi1h > 60: etat = "ACHAT"
+        elif rsi15 < 40 and rsi1h < 40: etat = "VENTE"
 
-    while True:
-        for sym in PAIRES:
-            try:
-                sig,r15,r1h,price = get_signal(sym)
-                if "ERR" in str(sig): continue
-                now=datetime.now()
-                if sig=="CALME":
-                    if (now-debut_calme[sym]).total_seconds()>=900:
-                        send(f"⚪ *CALME {sym}* depuis 15min\n15m:{r15:.1f} 1h:{r1h:.1f}")
-                        debut_calme[sym]=now
-                    continue
-                debut_calme[sym]=now
-                if dernier_signal.get(sym)!=sig or (now-dernier_envoi.get(sym, datetime.min)).total_seconds()>=2700:
-                    send(f"{'🔵' if sig=='ACHAT' else '🔴'} *{sig} {sym}*\n15m:{r15:.1f} 1h:{r1h:.1f} | {price:.4f}")
-                    dernier_signal[sym]=sig; dernier_envoi[sym]=now
-            except: pass
-            time.sleep(2)
-        time.sleep(60)
+        ancien = dernier_etat.get(sym, "CALME")
 
-threading.Thread(target=run_bot, daemon=True).start()
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+        # 1. NOUVEAU SIGNAL TENDANCE
+        if etat!= ancien and etat!= "CALME":
+            # anti spam 5 min pour nouveau signal
+            if sym not in dernier_envoi or (now - dernier_envoi[sym]) > timedelta(minutes=5):
+                emoji = "🟢" if etat=="ACHAT" else "🔴"
+                send(f"{emoji} *{name} {etat} V6.1*\nRSI 15m: {rsi15:.1f} >/< 60/40\nRSI 1H: {rsi1h:.1f}\nHeure: {now.strftime('%H:%M')}")
+                dernier_envoi[sym] = now
+
+        # 2. CORRECTION IMMEDIATE QUE TU VOULAIS
+        if ancien == "ACHAT" and rsi15 < 60:
+            send(f"⚠️ *{name} FIN ACHAT / STOP*\nRSI 15m repasse sous 60: {rsi15:.1f}\nRSI 1H: {rsi1h:.1f}\nPrenez TP / Sortez")
+
+        if ancien == "VENTE" and rsi15 > 40:
+            send(f"⚠️ *{name} FIN VENTE / STOP*\nRSI 15m repasse au dessus de 40: {rsi15:.1f}\nRSI 1H: {rsi1h:.1f}\nPrenez TP / Sortez")
+
+        # 3. CALME toutes les 15 min
+        if etat == "CALME":
+            if sym not in dernier_calme or (now - dernier_calme[sym]) > timedelta(minutes=15):
+                send(f"⚪ *{name} CALME*\nRSI 15m: {rsi15:.1f} | RSI 1H: {rsi1h:.1f} | Entre 40-60")
+                dernier_calme[sym] = now
+
+        dernier_etat[sym] = etat
+        print(f"{now.strftime('%H:%M')} {name} {etat} | {rsi15:.1f} | {rsi1h:.1f}")
+
+# Flask pour Render
+app = Flask('')
+@app.route('/')
+def home(): return "Bot V6.1 STOP immediat en ligne"
+Thread(target=lambda: app.run(host='0.0.0.0', port=10000)).start()
+
+send("🚀 *Bot V6.1 lancé - STOP immédiat actif*")
+while True:
+    check()
+    time.sleep(60)
