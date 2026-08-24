@@ -9,12 +9,11 @@ PAIRES = ['BTC-USD','ETH-USD','SOL-USD','DOGE-USD','SHIB-USD','AVAX-USD']
 NAMES = {'BTC-USD':'BTC','ETH-USD':'ETH','SOL-USD':'SOL','DOGE-USD':'DOGE','SHIB-USD':'SHIB','AVAX-USD':'AVAX'}
 
 dernier_etat = {}
-dernier_envoi_achat_vente = {}
 dernier_calme = {}
+a_deja_stop = {}
 
 def send(msg):
-    try:
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+    try: requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
     except: pass
 
 def get_rsi(symbol, interval, period):
@@ -26,8 +25,7 @@ def get_rsi(symbol, interval, period):
         delta = close.diff()
         gain = delta.where(delta>0,0).ewm(alpha=1/14, adjust=False).mean()
         loss = -delta.where(delta<0,0).ewm(alpha=1/14, adjust=False).mean()
-        rs = gain/loss
-        return float((100 - (100/(1+rs))).iloc[-1])
+        return float((100 - (100/(1+gain/loss))).iloc[-1])
     except: return None
 
 def check():
@@ -43,40 +41,39 @@ def check():
         etat = "CALME"
         if rsi15>60 and rsi1h>60: etat="ACHAT"
         elif rsi15<40 and rsi1h<40: etat="VENTE"
-        ancien = dernier_etat.get(sym)
+        ancien = dernier_etat.get(sym, "PREMIER")
 
-        # 1. NOUVEL ACHAT/VENTE = 1 seule fois
+        # 1. NOUVEL ACHAT/VENTE une seule fois
         if etat in ["ACHAT","VENTE"] and ancien!= etat:
-            # anti-spam 5 min
-            if sym not in dernier_envoi_achat_vente or (now - dernier_envoi_achat_vente[sym]) > timedelta(minutes=5):
-                send(f"{'🟢' if etat=='ACHAT' else '🔴'} {name} {etat} | 15m:{rsi15:.1f} 1H:{rsi1h:.1f}")
-                dernier_envoi_achat_vente[sym]=now
+            send(f"{'🟢' if etat=='ACHAT' else '🔴'} {name} {etat} | 15m:{rsi15:.1f} 1H:{rsi1h:.1f}")
+            a_deja_stop[sym]=False
+            dernier_calme.pop(sym, None)
 
-        # 2. STOP IMMEDIAT
-        if ancien=="ACHAT" and rsi15<60:
+        # 2. STOP une seule fois (corrige ton spam 14:33 / 14:39)
+        if ancien=="ACHAT" and rsi15<60 and not a_deja_stop.get(sym, False):
             send(f"⚠️ {name} FIN ACHAT / STOP | 15m:{rsi15:.1f}")
-        if ancien=="VENTE" and rsi15>40:
+            a_deja_stop[sym]=True
+        if ancien=="VENTE" and rsi15>40 and not a_deja_stop.get(sym, False):
             send(f"⚠️ {name} FIN VENTE / STOP | 15m:{rsi15:.1f}")
+            a_deja_stop[sym]=True
 
-        # 3. CALME toutes les 15 min exactement
+        # 3. CALME toutes les 15 MIN STRICT (corrige ton screen)
         if etat=="CALME":
-            if sym not in dernier_calme or (now - dernier_calme[sym]) > timedelta(minutes=15):
+            if sym not in dernier_calme or (now - dernier_calme[sym]) >= timedelta(minutes=15):
                 send(f"⚪ {name} CALME | 15m:{rsi15:.1f} 1H:{rsi1h:.1f}")
                 dernier_calme[sym]=now
 
-        dernier_etat[sym]=etat
+        if ancien!= etat or ancien=="PREMIER":
+            dernier_etat[sym]=etat
         print(f"{now.strftime('%H:%M:%S')} {name} {etat} {rsi15:.1f}/{rsi1h:.1f}")
 
 app = Flask('')
 @app.route('/')
-def home(): return "V6.3 en ligne"
+def home(): return "V6.4 HORAIRE STRICT"
 Thread(target=lambda: app.run(host='0.0.0.0', port=10000)).start()
 
-send("🚀 V6.3 FIX TIMER - 1min check / 15min CALME")
+send("🚀 V6.4 HORAIRE STRICT - V6 intacte | Check 1min | CALME 15min")
 while True:
-    start = time.time()
+    t0=time.time()
     check()
-    elapsed = time.time() - start
-    # pour faire exactement 60 sec entre 2 checks
-    wait = max(10, 60 - elapsed)
-    time.sleep(wait)
+    time.sleep(max(10, 60 - (time.time()-t0)))
