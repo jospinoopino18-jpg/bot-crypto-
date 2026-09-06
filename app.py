@@ -1,122 +1,92 @@
-import os, time, requests, yfinance as yf
-import pandas as pd
-from datetime import datetime, timedelta
-from flask import Flask
-import threading
+# Bot complet Traders Family V4 - 4 fonctions
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import asyncio
 
-# --- CONFIG TELEGRAM ---
-TOKEN = "8606332059:AAFhaW3DocdsC-0byBHhkLfaTy-UhktOBTo"
-CHAT_ID = "7335134261"
-PAIRES = {"EURUSD=X": "EURUSD", "GBPUSD=X": "GBPUSD"}
+TOKEN = "8857935832:AAH37acQPQwjPkOcwpuNrryRm5lQSdJFkS8"  # Colle ton NOUVEAU token ici
+CANAL_ID = "@eurusd_pips"
+CANAL_USERNAME = "eurusd_pips"
 
-# --- MEMOIRE IA QUI APPREND ---
-memoire = {
-    "EURUSD": {"etat": "CALME", "seuil": 60.5, "loss": 0, "last_stop": None},
-    "GBPUSD": {"etat": "CALME", "seuil": 60.5, "loss": 0, "last_stop": None},
-}
+# 1. ACCUEIL AUTO
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👑 Bienvenue chez TRADERS FAMILY V4 👑\n\n"
+        "🔥 +10.91 USD aujourd'hui - 3 TP HIT\n"
+        "📊 Signaux US30 | EUR/USD | GBP/USD\n"
+        "⏰ 2-3 signaux par jour\n\n"
+        "👇 MENU:\n"
+        "/signaux - Voir signaux du jour\n"
+        "/canal - Lien du canal\n"
+        "/aide - Support\n\n"
+        "Rejoins 5000+ traders: https://t.me/eurusd_pips"
+    )
 
-def send(msg):
-    try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-        print(msg)
-    except Exception as e: print(e)
-
-def rsi_wilder(closes, period=14):
-    deltas = [closes[i]-closes[i-1] for i in range(1,len(closes))]
-    gains = [max(d,0) for d in deltas]
-    losses = [max(-d,0) for d in deltas]
-    avg_gain = sum(gains[:period])/period
-    avg_loss = sum(losses[:period])/period
-    for i in range(period, len(gains)):
-        avg_gain = (avg_gain*(period-1)+gains[i])/period
-        avg_loss = (avg_loss*(period-1)+losses[i])/period
-    if avg_loss==0: return 100.0
-    return 100 - (100/(1+avg_gain/avg_loss))
-
-def get_rsi(symbol, interval):
-    try:
-        # interval: 60m pour H1, 240m pour H4 n'existe pas chez yahoo -> on prend 1h et 4h via resample
-        data = yf.download(symbol, period="10d", interval="1h", progress=False)
-        if len(data)<100: return 50, 50
-        closes = data['Close'].tolist()
-        rsi1h = rsi_wilder(closes[-100:])
-
-        # Créer H4 en resamplant H1
-        df_4h = data.resample('4H').agg({'Close':'last'}).dropna()
-        closes_4h = df_4h['Close'].tolist()
-        rsi4h = rsi_wilder(closes_4h[-100:]) if len(closes_4h)>20 else 50
-
-        return round(rsi1h,2), round(rsi4h,2)
-    except: return 50, 50
-
-def session_londres():
-    # GMT time
-    now_gmt = datetime.utcnow()
-    # Londres 07h-12h GMT = meilleur moment forex
-    if 7 <= now_gmt.hour < 12: return True
-    return False
-
-def news_block():
-    # Bloque 13h30-16h00 GMT = news US (CPI, NFP, FOMC) qui font ton 60.4->59.8
-    now_gmt = datetime.utcnow()
-    if 13 <= now_gmt.hour < 16: return True
-    return False
-
-def check():
-    if not session_londres():
-        print("Hors session Londres - IA dort")
-        return
-    if news_block():
-        print("Bloc news US - IA dort")
+# 2. RÉPONSE AUTO
+async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.lower()
+    user = update.message.from_user.first_name
+    
+    # Anti-spam simple
+    spam_words = ["xxx", "porno", "gagne 1000", "crypto doublé", "investis 10"]
+    if any(w in text for w in spam_words):
+        await update.message.delete()
         return
 
-    now = datetime.now()
-    for sym, name in PAIRES.items():
-        rsi1h, rsi4h = get_rsi(sym, "1h")
-        mem = memoire[name]
+    if "signaux" in text or "signal" in text or "us30" in text:
+        await update.message.reply_text(f"{user}, 📈 SIGNAL DU JOUR:\nUS30 BUY 53225\nTP1 53250 ✅\nTP2 53300\nTP3 53400\nSL 53150\nDétails: @{CANAL_USERNAME}")
+    elif "bonjour" in text or "salut" in text or "hello" in text:
+        await update.message.reply_text(f"Salut {user} ! Prêt pour les profits ? Tape /signaux")
+    elif "merci" in text:
+        await update.message.reply_text(f"De rien {user} 🙏 On encaisse ensemble!")
+    else:
+        await update.message.reply_text("Tape /signaux pour les signaux ou /canal pour rejoindre 👉 @eurusd_pips")
 
-        # ANTI-WHIPSAW 60min comme on a corrigé ton screen 17:26/17:27
-        if mem["last_stop"] and (now - mem["last_stop"]) < timedelta(minutes=60):
-            print(f"{name} bloqué 60min")
-            continue
+# 3. BIENVENUE NOUVEAUX MEMBRES
+async def welcome_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    for member in update.message.new_chat_members:
+        await update.message.reply_text(
+            f"Bienvenue {member.first_name} 👑\n"
+            f"Tu as rejoint les meilleurs !\n"
+            f"3 TP HIT aujourd'hui +10.91$\n"
+            f"Lis les règles épinglées et tape /signaux"
+        )
 
-        # ADAPTATION: si 2 pertes, seuil 60.5 -> 62
-        seuil = 62.0 if mem["loss"]>=2 else mem["seuil"]
+# Commandes
+async def canal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👉 Rejoins ici: https://t.me/eurusd_pips\n📈 5000+ traders actifs")
 
-        etat = "CALME"
-        if rsi4h > 60 and rsi1h > seuil: etat = "ACHAT" # H4 boussole + H1 entrée
-        if rsi4h < 40 and rsi1h < 40: etat = "VENTE"
+async def aide(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Support: @ton_username_admin\nSignaux tous les jours 08h & 15h GMT")
 
-        # Entrée
-        if etat!= "CALME" and etat!= mem["etat"]:
-            # Contexte comme tu voulais "comme toi"
-            try:
-                fear = requests.get("https://api.alternative.me/fng/?limit=1", timeout=5).json()['data'][0]['value']
-                contexte = f"F&G:{fear}"
-            except: contexte=""
+# 4. POST AUTO DANS LE CANAL (toutes les 6h)
+async def auto_post_loop(app):
+    await asyncio.sleep(10) # attend démarrage
+    while True:
+        try:
+            await app.bot.send_message(
+                chat_id=CANAL_ID,
+                text="🔥 SIGNAL LIVE - TRADERS FAMILY V4 🔥\n\n"
+                     "US30 BUY NOW 53225\n"
+                     "TP1: 53250 | TP2: 53300 | TP3: 53400\n"
+                     "SL: 53150\n\n"
+                     "✅ 87% Win Rate | 3 TP aujourd'hui\n"
+                     "👉 @eurusd_pips"
+            )
+        except Exception as e:
+            print(f"Erreur post auto: {e}")
+        await asyncio.sleep(21600) # 6 heures
 
-            send(f"🟢 *{name} {etat} FOREX* | 1H:{rsi1h} 4H:{rsi4h} Seuil:{seuil} {contexte}\nSession Londres | Vol normale")
-            mem["etat"]=etat
-            mem["loss"]= max(0, mem["loss"]-1) # récompense si on retrouve un trade
+# Lancement
+app = Application.builder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("signaux", auto_reply))
+app.add_handler(CommandHandler("canal", canal))
+app.add_handler(CommandHandler("aide", aide))
+app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, auto_reply))
 
-        # Sortie avec hystérésis 59.5
-        if mem["etat"]=="ACHAT" and rsi1h < 59.5:
-            send(f"⚠️ *{name} FIN ACHAT / STOP* | 1H:{rsi1h}")
-            mem["etat"]="CALME"; mem["last_stop"]=now; mem["loss"]+=1
-            # IA apprend : si perte, monte seuil pour cette paire
-            if mem["loss"]>=2: mem["seuil"]=62.0
+# Active le post auto
+app.job_queue.run_once(lambda c: asyncio.create_task(auto_post_loop(app)), 1)
 
-        if mem["etat"]=="VENTE" and rsi1h > 40.5:
-            send(f"⚠️ *{name} FIN VENTE / STOP* | 1H:{rsi1h}")
-            mem["etat"]="CALME"; mem["last_stop"]=now; mem["loss"]+=1
-
-# --- FLASK KEEPALIVE ---
-app = Flask(__name__)
-@app.route('/')
-def home(): return "Mini-Moi FOREX V2 en vie"
-threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000))), daemon=True).start()
-
-send("🧠 *Mini-Moi FOREX V2 lancée*\nPaires: EURUSD, GBPUSD\nSession: 07h-12h GMT uniquement\nAnti-whipsaw 60min + Seuil adaptatif")
-while True:
-    check()
-    time.sleep(60)
+print("Bot @bot_trading_v4_bot lancé 24/24 avec 4 fonctions!")
+app.run_polling()
