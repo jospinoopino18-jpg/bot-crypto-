@@ -1,5 +1,5 @@
 import requests, time
-TOKEN = "8606332059:AAFhaW3DocdsC-0byBHhkLfaTy-UhktOBTo"
+TOKEN = "8857935832:AAH37acQPQwjPkOcwpuNrryRm5lQSdJFkS8"
 CHAT_ID = "7335134261"
 
 # Test direct immédiat
