@@ -1,5 +1,5 @@
 import telebot
-TOKEN = "8857935832:AAGcA6N7JNzeKLW2cjL_RrcNx_gPTTUItKw"
+TOKEN = "8857935832:AAE8c7Xdqlb5o9vQmfSbpiH7anBMsLLSLts"
 bot = telebot.TeleBot(TOKEN)
 
 CANAL = "@ton_nom_de_canal" # ex: @crypto_douala
