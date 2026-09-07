@@ -1,12 +1,12 @@
-import requests, time
+import telebot
 TOKEN = "8857935832:AAH37acQPQwjPkOcwpuNrryRm5lQSdJFkS8"
-CHAT_ID = "7335134261"
+bot = telebot.TeleBot(TOKEN)
 
-# Test direct immédiat
-r = requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": "BOT REPLIT OK 🚀"})
-print(r.text)
-print("Si tu vois ok:true ci-dessus, regarde Telegram !")
+CANAL = "@ton_nom_de_canal" # ex: @crypto_douala
 
-# Boucle pour garder Replit allumé
-while True:
-    time.sleep(60)
+@bot.message_handler(func=lambda m: True)
+def repondre(message):
+    bot.reply_to(message, "Salut, j'ai bien reçu ton message !")
+    bot.send_message(CANAL, f"Nouveau message de {message.from_user.first_name}: {message.text}")
+
+bot.infinity_polling()
