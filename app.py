@@ -9,4 +9,4 @@ print("Si tu vois ok:true ci-dessus, regarde Telegram !")
 
 # Boucle pour garder Replit allumé
 while True:
-    time.sleep(60)
+    time.sleep(60))
